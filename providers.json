@@ -1,0 +1,59 @@
+{
+  "version": "1",
+  "providers": [
+    {
+      "name": "OpenAI",
+      "billing_url": "https://platform.openai.com/settings/organization/billing/overview",
+      "merchant_name": "OpenAI",
+      "merchant_url": "https://platform.openai.com",
+      "has_native_auto_reload": true,
+      "suggested_topup_amount_usd": 50,
+      "billing_url_verified": true,
+      "context_template": "Top up OpenAI API credits by ${{amount}} USD. The agent's API calls are failing with quota/credit errors. Provider: OpenAI. Purpose: restore API access so the coding session can continue.",
+      "error_patterns": [
+        "insufficient_quota",
+        "You exceeded your current quota",
+        "RateLimitError",
+        "insufficient credits",
+        "credit limit"
+      ],
+      "notes": "OpenAI has native auto-reload — prefer enabling that over repeated manual top-ups. Use this skill only when auto-reload is not configured or has failed."
+    },
+    {
+      "name": "Anthropic",
+      "billing_url": "https://platform.claude.com/settings/billing",
+      "merchant_name": "Anthropic",
+      "merchant_url": "https://platform.claude.com",
+      "has_native_auto_reload": true,
+      "suggested_topup_amount_usd": 50,
+      "billing_url_verified": true,
+      "context_template": "Top up Anthropic API credits by ${{amount}} USD. The agent's API calls are failing with credit balance errors. Provider: Anthropic. Purpose: restore API access so the coding session can continue.",
+      "error_patterns": [
+        "credit balance too low",
+        "Your credit balance is too low",
+        "insufficient_balance",
+        "billing_error",
+        "overloaded_error"
+      ],
+      "notes": "Anthropic has native auto-reload — prefer enabling that over repeated manual top-ups. Use this skill only when auto-reload is not configured or has failed."
+    },
+    {
+      "name": "v0",
+      "billing_url": "https://v0.app/nidhi-4345/settings/billing",
+      "merchant_name": "v0 by Vercel",
+      "merchant_url": "https://v0.app",
+      "has_native_auto_reload": false,
+      "suggested_topup_amount_usd": 20,
+      "billing_url_verified": true,
+      "context_template": "Top up v0 (Vercel AI) credits by ${{amount}} USD. The agent's generation requests are failing due to insufficient credits. Provider: v0 by Vercel. Purpose: restore generation access so the coding session can continue.",
+      "error_patterns": [
+        "insufficient credits",
+        "credit limit reached",
+        "generation limit",
+        "out of credits",
+        "402"
+      ],
+      "notes": "v0 does not have built-in auto-reload as of registry creation — verify current status at the billing URL before top-up."
+    }
+  ]
+}

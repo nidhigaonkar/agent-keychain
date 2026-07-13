@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "link-cli": {
+      "command": "npx",
+      "args": ["@stripe/link-cli", "mcp"],
+      "description": "Stripe Link CLI — handles wallet, spend requests, and approval flow for Agent Keychain."
+    }
+  }
+}

@@ -139,13 +139,37 @@ human — do not retry automatically.
 
 ---
 
-## 4. After approval — handing off the card (v0)
+## 4. After approval — completing the top-up
 
 **Never print raw card numbers, CVCs, or expiry dates to stdout, to logs, or
 anywhere visible in the conversation.**
 
-The card details are in the `--output-file` you specified. When the spend-
-request is approved:
+### 4a. Automated checkout (preferred)
+
+Check `checkout_script` in `providers.json` for the matched provider. If it
+is set, run the checkout script — it will open a headed browser, navigate to
+the billing page, fill the card form, and delete the card file on success:
+
+```bash
+node scripts/checkout/run.js \
+  --provider "<provider name>" \
+  --card-file "<output-file path>"
+```
+
+The browser opens headed so the human can see it and intervene if needed. If
+the user is not already logged in, the script will pause and prompt them to
+log in. Session cookies are stored in `~/.agent-keychain/browser-profile/` so
+subsequent runs skip the login step.
+
+Exit code 0 = success (card file deleted automatically).
+Exit code 1 = failure (reason on stderr, screenshot saved to
+`~/.agent-keychain/checkout-error-<timestamp>.png`).
+
+On failure, fall back to the manual handoff in 4b.
+
+### 4b. Manual fallback
+
+If `checkout_script` is not set, or automated checkout fails:
 
 1. Tell the human:
    > "Your Stripe Link card is ready. The details are in:
@@ -157,12 +181,7 @@ request is approved:
 2. Do not read the output file yourself. Do not relay its contents. Do not
    pass it to any other tool or script.
 
-3. Delete the output file once the human confirms the top-up is complete
-   (to avoid leaving card data on disk longer than needed).
-
-> **v1 note (not yet built):** `scripts/checkout/` is reserved for per-
-> provider browser automation that will fill the billing form automatically.
-> Until that's implemented, the manual handoff above is the only approach.
+3. Delete the output file once the human confirms the top-up is complete.
 
 ---
 
@@ -197,11 +216,13 @@ has_native_auto_reload?
          ↓
        wait for human approval in Link app  ← NEVER SKIP
          ↓
-       approved? → tell human: file path + billing URL
+       approved? → retrieve with --include card --output-file
        denied?   → stop, inform human
          ↓
-       human confirms top-up done
-         ↓
-       delete output file
-       call scripts/log-topup.js
+       checkout_script set for provider?
+         YES → node scripts/checkout/run.js --provider ... --card-file ...
+               success? → card file auto-deleted → call log-topup.js
+               fail?    → screenshot saved → fall through to manual
+         NO / fail → tell human: card file path + billing URL
+                     human confirms → delete card file → call log-topup.js
 ```

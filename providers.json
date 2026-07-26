@@ -17,6 +17,7 @@
         "insufficient credits",
         "credit limit"
       ],
+      "checkout_script": "openai.js",
       "notes": "OpenAI has native auto-reload — prefer enabling that over repeated manual top-ups. Use this skill only when auto-reload is not configured or has failed."
     },
     {
@@ -35,11 +36,12 @@
         "billing_error",
         "overloaded_error"
       ],
+      "checkout_script": "anthropic.js",
       "notes": "Anthropic has native auto-reload — prefer enabling that over repeated manual top-ups. Use this skill only when auto-reload is not configured or has failed."
     },
     {
       "name": "v0",
-      "billing_url": "https://v0.app/nidhi-4345/settings/billing",
+      "billing_url": "https://v0.app/gaonkarnidhi1-2736/settings/billing",
       "merchant_name": "v0 by Vercel",
       "merchant_url": "https://v0.app",
       "has_native_auto_reload": false,
@@ -53,7 +55,8 @@
         "out of credits",
         "402"
       ],
-      "notes": "v0 does not have built-in auto-reload as of registry creation — verify current status at the billing URL before top-up."
+      "checkout_script": "v0.js",
+      "notes": "v0 has no standalone 'buy credits' button. The checkout automation clicks 'Add Card' to register the Link virtual card as a payment method, which can then be used for auto-recharge or plan upgrades. After the card is added, enable auto-recharge via the 'Enable' button on the billing page."
     }
   ]
 }

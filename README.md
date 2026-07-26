@@ -20,12 +20,12 @@ page. One approval tap, credits restored, coding resumes.
    string and tap Approve.
 5. The agent receives a one-time virtual card saved to a local file (never
    printed to the terminal).
-6. The agent tells you: "card is at `<path>`, top up at `<billing_url>`".
-7. You paste the card, complete the top-up, tell the agent it's done.
-8. The agent logs the transaction locally and deletes the card file.
-
-The agent never touches the checkout form itself — that's a deliberate v0
-constraint. See the roadmap below.
+6. The agent runs `scripts/checkout/run.js` — a headed Playwright browser
+   opens, navigates to the provider's billing page, and fills the card form
+   automatically. If you aren't logged in, it pauses and waits for you.
+7. On success the card file is deleted automatically and the transaction is
+   logged. If automation fails, the agent falls back to giving you the card
+   file path and billing URL to complete manually.
 
 ---
 
@@ -40,7 +40,7 @@ dollar spent — by design.
 
 ---
 
-## Setup (two steps)
+## Setup (three steps)
 
 ### Step 1 — Authenticate link-cli
 
@@ -52,7 +52,16 @@ This opens a browser, you log in with your Stripe Link account (or create a
 free one), and the CLI stores a local token. No Stripe developer account or
 API key needed.
 
-### Step 2 — Add the MCP server to Claude Code
+### Step 2 — Install Playwright
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+This installs the Chromium browser used for checkout automation. Only needed once.
+
+### Step 3 — Add the MCP server to Claude Code
 
 Open your Claude Code MCP config (usually `~/.claude/claude_desktop_config.json`
 or `.claude/settings.json` in your project) and merge in the block from
@@ -112,10 +121,10 @@ written to the log.
 
 ## Roadmap
 
-**v0 (current):** Manual card handoff. The agent gives you the card file path
-and billing URL; you complete the form yourself.
+**v1 (current):** Automated checkout via Playwright. The agent fills the card
+form in a headed browser session. Session cookies persist so you only need to
+log in to each provider once. Falls back to manual handoff if automation fails.
 
-**v1 (planned):** Per-provider browser automation in `scripts/checkout/`. Each
-provider gets a script that opens the billing page, fills the card form, and
-confirms the purchase — no human keystrokes needed. This will be added
-provider-by-provider once the page structure is stable.
+**v2 (potential):** Headless mode once per-provider selectors are battle-tested.
+Scheduled / proactive top-ups before hitting empty (not just reactive). Support
+for more providers.

@@ -43,7 +43,7 @@ function main() {
 
   let total = 0;
   for (const entry of log) {
-    const shortId = entry.id.replace("topup_", "").slice(-8);
+    const shortId = (entry.id || entry.spend_request_id || "").replace("topup_", "").slice(-8);
     const ts = entry.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z");
     const amount = `$${entry.amount_usd.toFixed(2)}`;
     console.log(

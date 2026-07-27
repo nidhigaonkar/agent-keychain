@@ -1,45 +1,50 @@
 // Anthropic billing checkout automation.
-// Navigates to platform.claude.com/settings/billing, clicks through the
-// "Add credits" flow, fills Stripe card form, submits.
+// Handles two cases:
+//   Saved card — a Stripe Link card is already on file; just select amount and confirm.
+//   New card   — no saved payment method; fill the Stripe card form then confirm.
 
 const DEFAULT_TIMEOUT = 15000;
 
+async function navigateToBilling(page, billingUrl) {
+  await page.goto(billingUrl, { waitUntil: "load" }).catch(() => {});
+  if (!page.url() || page.url() === "about:blank") {
+    throw new Error(`Navigation to ${billingUrl} failed — page is blank. Check network connectivity.`);
+  }
+}
+
 async function run(page, provider, card, { dryRun }) {
-  await page.goto(provider.billing_url, { waitUntil: "networkidle" });
+  await navigateToBilling(page, provider.billing_url);
 
   const currentUrl = page.url();
   if (currentUrl.includes("/login") || currentUrl.includes("/auth") || !currentUrl.includes("platform.claude.com")) {
     console.log(`\nNot logged in to Anthropic (landed on: ${currentUrl})`);
-    console.log("Please log in in the browser window. The script will continue automatically once you reach the billing page.");
+    console.log("Please log in in the browser window. The script will continue once you reach the billing page.");
     await page.waitForURL("**/settings/**", { timeout: 120000 });
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
   }
 
   if (!page.url().includes("billing")) {
-    await page.goto(provider.billing_url, { waitUntil: "networkidle" });
+    await navigateToBilling(page, provider.billing_url);
   }
 
-  console.log("On billing page. Looking for credit top-up option...");
+  console.log("On billing page. Opening buy-credits modal...");
 
-  // Anthropic shows a "Buy credits" or "Add credits" button
   const addCreditsBtn = page
     .getByRole("button", { name: /buy credits|add credits|purchase credits/i })
     .first();
   await addCreditsBtn.waitFor({ timeout: DEFAULT_TIMEOUT });
   await addCreditsBtn.click();
 
-  // Amount selection — Anthropic may show preset amounts or a custom input
+  // Amount selection — tiles show "$5", "$20", "$100" (no decimals)
   console.log("Selecting top-up amount...");
-  const amountLabel = `$${provider.suggested_topup_amount_usd}`;
-
-  // Try clicking a preset amount tile first
-  const presetTile = page.getByRole("button", { name: amountLabel }).first();
+  const amountInt = Math.round(provider.suggested_topup_amount_usd);
+  const amountLabel = `$${amountInt}`;
+  const presetTile = page.getByRole("button", { name: amountLabel, exact: true }).first();
   const presetVisible = await presetTile.isVisible({ timeout: 3000 }).catch(() => false);
 
   if (presetVisible) {
     await presetTile.click();
   } else {
-    // Fall back to a text input
     const customInput = page
       .getByRole("spinbutton")
       .or(page.locator('input[type="number"]'))
@@ -48,24 +53,38 @@ async function run(page, provider, card, { dryRun }) {
     await customInput.fill(String(provider.suggested_topup_amount_usd));
   }
 
-  // Stripe Elements card form
-  console.log("Filling card details...");
-  await fillStripeElements(page, card);
+  // Detect whether a Stripe payment iframe is present (new-card flow) or not (saved-card flow)
+  const stripeFramePresent = await page
+    .locator('iframe[name^="__privateStripeFrame"], iframe[title*="Secure payment" i], iframe[title*="card number" i]')
+    .first()
+    .isVisible({ timeout: 4000 })
+    .catch(() => false);
+
+  if (stripeFramePresent) {
+    console.log("No saved card — filling card details...");
+    await fillStripeElements(page, card);
+  } else {
+    console.log("Saved card detected — skipping card form.");
+  }
 
   if (dryRun) {
     console.log("DRY RUN: skipping submit.");
     return;
   }
 
+  // Submit button: "Buy $5 of credits", "Buy $20 of credits", etc.
   const submitBtn = page
-    .getByRole("button", { name: /confirm|pay|purchase|buy now|add credits/i })
-    .last();
+    .getByRole("button", { name: /buy \$\d+ of credits/i })
+    .first();
   await submitBtn.waitFor({ timeout: DEFAULT_TIMEOUT });
   await submitBtn.click();
 
-  await page
-    .getByText(/payment successful|credits added|purchase complete|thank you/i)
-    .waitFor({ timeout: 30000 });
+  // Success: Anthropic shows a "Processing purchase…" spinner overlay, then the
+  // modal closes and the billing page reflects the new balance.
+  // Wait for the processing overlay to appear, then wait for it (and the modal) to close.
+  const processingText = page.getByText(/processing/i);
+  await processingText.waitFor({ timeout: 10000 }).catch(() => {});
+  await page.locator('[role="dialog"]').waitFor({ state: "hidden", timeout: 30000 });
 
   console.log("Anthropic credit top-up confirmed.");
 }
@@ -74,7 +93,7 @@ async function fillStripeElements(page, card) {
   const expiry = `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`;
 
   const unifiedFrame = page
-    .frameLocator('iframe[name^="__privateStripeFrame"]')
+    .frameLocator('iframe[name^="__privateStripeFrame"], iframe[title*="Secure payment" i]')
     .first();
 
   const isUnified = await unifiedFrame
@@ -90,6 +109,7 @@ async function fillStripeElements(page, card) {
     const numberInput = page
       .frameLocator('iframe[title*="card number" i]')
       .locator('[name="cardnumber"], [placeholder*="Card number"]');
+    await numberInput.waitFor({ timeout: DEFAULT_TIMEOUT });
     await numberInput.fill(card.number);
 
     const expiryInput = page
@@ -108,18 +128,6 @@ async function fillStripeElements(page, card) {
   if (zipVisible && card.billing_address?.postal_code) {
     await zipInput.fill(card.billing_address.postal_code);
   }
-}
-
-async function waitForKeypress() {
-  return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.once("data", () => {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      resolve();
-    });
-  });
 }
 
 module.exports = { run };

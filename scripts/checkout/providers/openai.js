@@ -4,19 +4,26 @@
 
 const DEFAULT_TIMEOUT = 15000;
 
+async function navigateToBilling(page, billingUrl) {
+  await page.goto(billingUrl, { waitUntil: "load" }).catch(() => {});
+  if (!page.url() || page.url() === "about:blank") {
+    throw new Error(`Navigation to ${billingUrl} failed — page is blank. Check network connectivity.`);
+  }
+}
+
 async function run(page, provider, card, { dryRun }) {
-  await page.goto(provider.billing_url, { waitUntil: "networkidle" });
+  await navigateToBilling(page, provider.billing_url);
 
   const currentUrl = page.url();
   if (currentUrl.includes("/auth") || currentUrl.includes("/login") || !currentUrl.includes("platform.openai.com")) {
     console.log(`\nNot logged in to OpenAI (landed on: ${currentUrl})`);
     console.log("Please log in in the browser window. The script will continue automatically once you reach the billing page.");
     await page.waitForURL("**/settings/**", { timeout: 120000 });
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
   }
 
   if (!page.url().includes("billing")) {
-    await page.goto(provider.billing_url, { waitUntil: "networkidle" });
+    await navigateToBilling(page, provider.billing_url);
   }
 
   console.log("On billing page. Looking for credit top-up button...");
@@ -85,6 +92,7 @@ async function fillStripeElements(page, card) {
     const numberInput = page
       .frameLocator('iframe[title*="card number" i]')
       .locator('[name="cardnumber"], [placeholder*="Card number"]');
+    await numberInput.waitFor({ timeout: DEFAULT_TIMEOUT });
     await numberInput.fill(card.number);
 
     const expiryInput = page
@@ -104,18 +112,6 @@ async function fillStripeElements(page, card) {
   if (zipVisible && card.billing_address?.postal_code) {
     await zipInput.fill(card.billing_address.postal_code);
   }
-}
-
-async function waitForKeypress() {
-  return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.once("data", () => {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      resolve();
-    });
-  });
 }
 
 module.exports = { run };

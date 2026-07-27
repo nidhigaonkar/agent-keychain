@@ -6,11 +6,18 @@
 
 const DEFAULT_TIMEOUT = 15000;
 
-async function run(page, provider, card, { dryRun }) {
-  await page.goto(provider.billing_url, { waitUntil: "load" }).catch(() => {});
-  await page.waitForTimeout(1500);
+async function navigateToBilling(page, billingUrl) {
+  await page.goto(billingUrl, { waitUntil: "load" }).catch(() => {});
+  if (!page.url() || page.url() === "about:blank") {
+    throw new Error(`Navigation to ${billingUrl} failed — page is blank. Check network connectivity.`);
+  }
+}
 
-  // Check where we landed after redirects settle
+async function run(page, provider, card, { dryRun }) {
+  await navigateToBilling(page, provider.billing_url);
+
+  // v0 redirects on login; let redirects settle before checking URL
+  await page.waitForLoadState("load");
   const currentUrl = page.url();
   const onBilling = currentUrl.includes("v0.app") && currentUrl.includes("billing");
 
@@ -18,11 +25,8 @@ async function run(page, provider, card, { dryRun }) {
     console.log(`\nNot logged in to v0 (landed on: ${currentUrl})`);
     console.log("Please log in in the browser window.");
     console.log("The script will continue automatically once you reach the billing settings page.");
-    // Wait for the user to log in and land back on a v0 settings page
     await page.waitForURL((url) => url.href.includes("v0.app") && url.href.includes("settings"), { timeout: 120000 });
-    // Then navigate to billing specifically
-    await page.goto(provider.billing_url, { waitUntil: "load" }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await navigateToBilling(page, provider.billing_url);
   }
 
   console.log("On v0 billing page. Looking for Add Card button...");
@@ -34,8 +38,7 @@ async function run(page, provider, card, { dryRun }) {
   await addCardBtn.click();
 
   // The modal opens: Stripe Link saved cards at top, new card form below.
-  // Fill the card form FIRST, then click "Add New Payment Method".
-  await page.waitForTimeout(2000);
+  // cardNumberInput.waitFor handles the delay until Stripe iframes inject.
 
   // Stripe Elements card form
   console.log("Filling card details...");
@@ -81,18 +84,6 @@ async function fillStripeElements(page, card) {
   if (zipVisible && card.billing_address?.postal_code) {
     await zipInput.fill(card.billing_address.postal_code);
   }
-}
-
-async function waitForKeypress() {
-  return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.once("data", () => {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      resolve();
-    });
-  });
 }
 
 module.exports = { run };

@@ -4,11 +4,13 @@
   "description": "Claude Code plugin — lets a coding agent top up its own API credits via Stripe Link",
   "main": "scripts/log-topup.js",
   "scripts": {
+    "setup": "node scripts/setup.js",
     "view-log": "node scripts/view-log.js",
     "log-topup": "node scripts/log-topup.js",
     "checkout": "node scripts/checkout/run.js"
   },
   "bin": {
+    "agent-keychain": "./scripts/setup.js",
     "keychain-view-log": "./scripts/view-log.js",
     "keychain-log-topup": "./scripts/log-topup.js",
     "keychain-checkout": "./scripts/checkout/run.js"

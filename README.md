@@ -4,9 +4,9 @@ A Claude Code plugin that lets a coding agent top up its own API credits when
 it runs low — using Stripe's Link wallet via the official `link-cli` MCP server.
 
 No Stripe account. No API keys. No payment infrastructure to run.
-The agent detects a quota error, requests a virtual card, you approve it in
-the Stripe Link app, and the agent hands you the card to paste into the billing
-page. One approval tap, credits restored, coding resumes.
+The agent detects a quota error, creates a spend request, you approve it with
+one click in your browser, and the agent completes the billing form automatically.
+Credits restored, coding resumes.
 
 ---
 
@@ -16,16 +16,12 @@ page. One approval tap, credits restored, coding resumes.
 2. It reads `providers.json` to identify the provider and billing URL.
 3. It calls `link-cli`'s `spend-request create` MCP tool with a plain-English
    description of what's being purchased.
-4. You get a push notification in the Stripe Link app — review the context
-   string and tap Approve.
-5. The agent receives a one-time virtual card saved to a local file (never
-   printed to the terminal).
-6. The agent runs `scripts/checkout/run.js` — a headed Playwright browser
-   opens, navigates to the provider's billing page, and fills the card form
-   automatically. If you aren't logged in, it pauses and waits for you.
-7. On success the card file is deleted automatically and the transaction is
-   logged. If automation fails, the agent falls back to giving you the card
-   file path and billing URL to complete manually.
+4. The agent posts a clickable approval link directly in your IDE chat:
+   **[Approve $5 for Anthropic](https://app.link.com/activity/approve/…)**
+   You click it, review the context and amount in your browser, and approve.
+5. A headed browser opens, navigates to the provider's billing page using your
+   existing login session, and completes the purchase automatically.
+6. The transaction is logged and the agent resumes coding.
 
 ---
 
@@ -40,46 +36,22 @@ dollar spent — by design.
 
 ---
 
-## Setup (three steps)
-
-### Step 1 — Authenticate link-cli
+## Setup (one command)
 
 ```bash
-npx @stripe/link-cli auth login --client-name "Agent Keychain"
+git clone https://github.com/your-org/agent-keychain
+cd agent-keychain
+npm run setup
 ```
 
-This opens a browser, you log in with your Stripe Link account (or create a
-free one), and the CLI stores a local token. No Stripe developer account or
-API key needed.
+The wizard handles everything:
 
-### Step 2 — Install Playwright
+1. **npm install** — installs dependencies (skips if already done)
+2. **Playwright Chromium** — downloads the browser used for checkout automation (~130 MB, one-time)
+3. **Stripe Link auth** — opens a browser so you can log in (or create a free account at link.stripe.com — no Stripe developer account or API key needed)
+4. **MCP config** — merges the `link-cli` server into your Claude Code config (global or project-scoped, your choice) and copies `SKILL.md` into `.claude/`
 
-```bash
-npm install
-npx playwright install chromium
-```
-
-This installs the Chromium browser used for checkout automation. Only needed once.
-
-### Step 3 — Add the MCP server to Claude Code
-
-Open your Claude Code MCP config (usually `~/.claude/claude_desktop_config.json`
-or `.claude/settings.json` in your project) and merge in the block from
-`mcp-config.json`:
-
-```json
-{
-  "mcpServers": {
-    "link-cli": {
-      "command": "npx",
-      "args": ["@stripe/link-cli", "mcp"]
-    }
-  }
-}
-```
-
-Restart Claude Code. The `link_spend_request_*` tools will now be available
-to the agent.
+Then restart Claude Code (or run `/mcp`) and you're done.
 
 ---
 
@@ -91,8 +63,23 @@ to the agent.
 | Anthropic | Yes | Prefer enabling Anthropic's own auto-reload first |
 | v0 (Vercel AI) | No | Billing URL contains your username slug — see providers.json |
 
-To add a provider, append an entry to `providers.json` following the existing
-schema.
+To add a provider, append an entry to `providers.json` following the existing schema.
+
+---
+
+## Monitoring your balance
+
+Agent Keychain triggers reactively — when the agent hits a credit error. If
+you want to stay ahead of that, enable native auto-reload on the providers
+that support it:
+
+- **Anthropic** — [platform.claude.com/settings/billing](https://platform.claude.com/settings/billing) → Auto reload
+- **OpenAI** — [platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing) → Auto recharge
+
+Set a low-balance threshold (e.g. reload $20 when balance drops below $5) and
+your card on file handles it automatically — no agent involvement needed.
+
+For **v0** (no native auto-reload), Agent Keychain is the primary solution.
 
 ---
 
@@ -103,28 +90,14 @@ npm run view-log
 ```
 
 Logs live at `~/.agent-keychain/audit-log.json`. They contain provider name,
-amount, timestamp, context string, and spend-request ID. No card data is ever
-written to the log.
+amount, timestamp, and spend-request ID. No card data is ever written to the log.
 
 ---
 
-## Security notes
+## Security
 
-- Card numbers and CVCs are written only to a short-lived local file
-  (`--output-file`), never to stdout, logs, or the conversation.
-- Every spend-request requires explicit human approval in the Stripe Link app.
+- Every spend-request requires explicit human approval before any money moves.
   There is no way for the agent to auto-approve.
-- Delete the card file after use — the agent does this automatically once you
-  confirm the top-up.
-
----
-
-## Roadmap
-
-**v1 (current):** Automated checkout via Playwright. The agent fills the card
-form in a headed browser session. Session cookies persist so you only need to
-log in to each provider once. Falls back to manual handoff if automation fails.
-
-**v2 (potential):** Headless mode once per-provider selectors are battle-tested.
-Scheduled / proactive top-ups before hitting empty (not just reactive). Support
-for more providers.
+- No credentials are stored by Agent Keychain. The Stripe Link auth token is
+  managed entirely by `link-cli` in its own secure location.
+- Card data is never printed to the terminal, logs, or the conversation.

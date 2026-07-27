@@ -1,22 +1,18 @@
 #!/usr/bin/env node
-// Main entry point for v1 checkout automation.
-// Usage: node scripts/checkout/run.js --provider <name> --card-file <path> [--dry-run]
+// Usage: node scripts/checkout/run.js --provider <name> [--dry-run]
 //
-// Reads the card file, launches a headed Playwright browser with a persistent
-// profile (so the user's provider session survives between runs), navigates to
-// the provider's billing page, and fills the card form.
-//
-// Card data is read once into memory, the file is deleted immediately after a
-// successful form fill. It is never logged, printed, or passed to subprocesses.
+// Card data is read from stdin as JSON — it never touches disk.
+// Pipe the spend-request card response directly:
+//   echo '<card-json>' | node scripts/checkout/run.js --provider Anthropic
 //
 // Exit codes: 0 = success, 1 = failure (reason printed to stderr)
 
-const fs = require("fs");
+const fs   = require("fs");
 const path = require("path");
-const os = require("os");
+const os   = require("os");
 const { chromium } = require("playwright");
 
-const PROFILE_DIR = path.join(os.homedir(), ".agent-keychain", "browser-profile");
+const PROFILE_DIR    = path.join(os.homedir(), ".agent-keychain", "browser-profile");
 const PROVIDERS_FILE = path.join(__dirname, "..", "..", "providers.json");
 
 function parseArgs(argv) {
@@ -33,46 +29,39 @@ function parseArgs(argv) {
 
 function usage() {
   console.error(`
-Usage: node scripts/checkout/run.js \\
-  --provider <name>       e.g. "OpenAI", "Anthropic", "v0"
-  --card-file <path>      path to the card JSON file from link-cli
-  [--dry-run]             navigate and fill but do not submit
+Usage: node scripts/checkout/run.js --provider <name> [--dry-run]
 
-Card data is never logged or printed. The card file is deleted after success.
+Card JSON is read from stdin:
+  echo '<json>' | node scripts/checkout/run.js --provider Anthropic
+
+The JSON must contain a top-level "card" object with number, exp_month,
+exp_year, cvc, and billing_address fields (the format returned by link-cli
+spend-request retrieve --include card).
 `);
   process.exit(1);
+}
+
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => { data += chunk; });
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", reject);
+  });
 }
 
 async function main() {
   const args = parseArgs(process.argv);
 
-  if (!args.provider || !args["card-file"]) {
-    console.error("Missing required arguments: --provider and --card-file");
+  if (!args.provider) {
+    console.error("Missing required argument: --provider");
     usage();
   }
 
-  const cardFilePath = path.resolve(args["card-file"]);
-  if (!fs.existsSync(cardFilePath)) {
-    console.error(`Card file not found: ${cardFilePath}`);
-    process.exit(1);
-  }
-
-  let cardData;
-  try {
-    cardData = JSON.parse(fs.readFileSync(cardFilePath, "utf8"));
-  } catch (e) {
-    console.error(`Could not parse card file: ${e.message}`);
-    process.exit(1);
-  }
-
-  if (!cardData.card || !cardData.card.number) {
-    console.error("Card file does not contain card credentials. Was it retrieved with --include card?");
-    process.exit(1);
-  }
-
   const registry = JSON.parse(fs.readFileSync(PROVIDERS_FILE, "utf8"));
-  const provider = registry.providers.find(
-    (p) => p.name.toLowerCase() === args.provider.toLowerCase()
+  const provider  = registry.providers.find(
+    p => p.name.toLowerCase() === args.provider.toLowerCase()
   );
   if (!provider) {
     console.error(`Unknown provider: ${args.provider}. Check providers.json.`);
@@ -83,34 +72,43 @@ async function main() {
     process.exit(1);
   }
 
-  const checkoutModule = require(path.join(__dirname, "providers", provider.checkout_script));
-
-  if (!fs.existsSync(PROFILE_DIR)) {
-    fs.mkdirSync(PROFILE_DIR, { recursive: true });
+  // Read card data from stdin — never written to disk by this script
+  let cardData;
+  try {
+    const raw = await readStdin();
+    cardData = JSON.parse(raw);
+  } catch (e) {
+    console.error(`Could not parse card JSON from stdin: ${e.message}`);
+    process.exit(1);
   }
 
+  if (!cardData.card || !cardData.card.number) {
+    console.error("stdin JSON does not contain card credentials (expected a .card.number field).");
+    process.exit(1);
+  }
+
+  const checkoutModule = require(path.join(__dirname, "providers", provider.checkout_script));
+
+  fs.mkdirSync(PROFILE_DIR, { recursive: true });
+
   console.log(`Launching browser for ${provider.name}...`);
-  console.log(`Browser profile: ${PROFILE_DIR}`);
   console.log(`Billing URL: ${provider.billing_url}`);
   if (args["dry-run"]) console.log("DRY RUN — form will not be submitted.");
 
   const browser = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: false,
-    channel: "chrome",
+    channel:  "chrome",
     viewport: { width: 1280, height: 800 },
-    args: ["--disable-blink-features=AutomationControlled"],
+    args:     ["--disable-blink-features=AutomationControlled"],
   });
 
   const page = await browser.newPage();
 
+  let checkoutOk = false;
   try {
     await checkoutModule.run(page, provider, cardData.card, { dryRun: !!args["dry-run"] });
     console.log(`\nCheckout complete for ${provider.name}.`);
-
-    if (!args["dry-run"]) {
-      fs.unlinkSync(cardFilePath);
-      console.log(`Card file deleted: ${cardFilePath}`);
-    }
+    checkoutOk = true;
   } catch (err) {
     const screenshotPath = path.join(
       os.homedir(), ".agent-keychain", `checkout-error-${Date.now()}.png`
@@ -120,14 +118,14 @@ async function main() {
       console.error(`Screenshot saved: ${screenshotPath}`);
     } catch {}
     console.error(`\nCheckout failed: ${err.message}`);
+  } finally {
     await browser.close();
-    process.exit(1);
   }
 
-  await browser.close();
+  if (!checkoutOk) process.exit(1);
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error(`Unexpected error: ${err.message}`);
   process.exit(1);
 });

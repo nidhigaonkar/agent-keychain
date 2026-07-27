@@ -26,7 +26,7 @@
       "merchant_name": "Anthropic",
       "merchant_url": "https://platform.claude.com",
       "has_native_auto_reload": true,
-      "suggested_topup_amount_usd": 50,
+      "suggested_topup_amount_usd": 5,
       "billing_url_verified": true,
       "context_template": "Top up Anthropic API credits by ${{amount}} USD. The agent's API calls are failing with credit balance errors. Provider: Anthropic. Purpose: restore API access so the coding session can continue.",
       "error_patterns": [

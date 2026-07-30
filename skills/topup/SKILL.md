@@ -1,3 +1,12 @@
+---
+name: topup
+description: >-
+  Requests a Stripe Link virtual card to top up an API provider's (OpenAI,
+  Anthropic, v0) credits and automates the billing checkout. Use when an
+  agent's API calls fail with a quota, credit-balance, or billing error, or
+  when the user explicitly asks to top up API credits.
+---
+
 # Agent Keychain — Top-Up Skill
 
 You are an agent running inside a coding session. This skill tells you what to

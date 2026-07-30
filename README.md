@@ -28,7 +28,7 @@ Credits restored, coding resumes.
 ## Setup (one command)
 
 ```bash
-git clone https://github.com/your-org/agent-keychain
+git clone https://github.com/nidhigaonkar/agent-keychain
 cd agent-keychain
 npm run setup
 ```
@@ -38,7 +38,8 @@ The setup wizard handles everything:
 1. **npm install** — installs dependencies (skips if already done)
 2. **Playwright Chromium** — downloads the browser used for checkout automation (~130 MB, one-time)
 3. **Stripe Link auth** — opens a browser so you can log in (or create a free account at link.stripe.com — no Stripe developer account or API key needed)
-4. **MCP config** — merges the `link-cli` server into your Claude Code config (global or project-scoped, your choice) and copies `SKILL.md` into `.claude/`
+4. **Provider setup** — fills in any per-user info a provider needs (e.g. v0's billing URL contains your personal username slug) so `providers.json` works for your account, not just the maintainer's
+5. **MCP config** — merges the `link-cli` server into your Claude Code config (global or project-scoped, your choice) and copies the `topup` skill into `.claude/skills/topup/`
 
 Then restart Claude Code (or run `/mcp`) and you're done.
 
@@ -50,9 +51,23 @@ Then restart Claude Code (or run `/mcp`) and you're done.
 |---|---|---|
 | OpenAI | Yes | Prefer enabling OpenAI's own auto-reload first |
 | Anthropic | Yes | Prefer enabling Anthropic's own auto-reload first |
-| v0 (Vercel AI) | No | Billing URL contains your username slug — see providers.json |
+| v0 (Vercel AI) | No | Billing URL contains your username slug — filled in by `npm run setup` |
 
 To add a provider, append an entry to `providers.json` following the existing schema.
+
+---
+
+## Known limitations
+
+- **Checkout automation is UI-selector-based** and will break if a provider
+  changes its billing page layout. If a checkout script fails, it saves a
+  screenshot to `~/.agent-keychain/checkout-error-<timestamp>.png` and falls
+  back to a manual link — but treat the automated flow as best-effort, not
+  guaranteed, especially for providers you haven't tested it against yourself.
+- Only the Anthropic checkout flow has been verified end-to-end against the
+  live billing page. OpenAI and v0 automation is implemented but less
+  battle-tested — run with `--dry-run` first if you want to sanity-check the
+  flow before it submits a real purchase.
 
 ---
 

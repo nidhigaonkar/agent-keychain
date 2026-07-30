@@ -76,7 +76,7 @@ function mergeJson(filePath, patch) {
     process.exit(1);
   }
 
-  const TOTAL = 4;
+  const TOTAL = 5;
 
   // ── Step 1: npm install ────────────────────────────────────────────────────
   step(1, TOTAL, "Installing npm dependencies…");
@@ -130,8 +130,63 @@ function mergeJson(filePath, patch) {
     console.log(`  ${ok} Authenticated`);
   }
 
-  // ── Step 4: MCP config ─────────────────────────────────────────────────────
-  step(4, TOTAL, "Wiring up MCP server in Claude Code…");
+  // ── Step 4: Fill in per-user provider placeholders ─────────────────────────
+  step(4, TOTAL, "Customising providers.json…");
+
+  const providersFile = path.join(pkgDir, "providers.json");
+  const placeholderRe = /\{\{(\w+)\}\}/g;
+
+  try {
+    const registry = JSON.parse(fs.readFileSync(providersFile, "utf8"));
+    let changed = false;
+
+    // Only `billing_url` is meant to carry per-user setup-time placeholders.
+    // `context_template` intentionally keeps a {{amount}} placeholder that the
+    // agent fills in per-request at runtime — never touch that one here.
+    const SETUP_TIME_FIELDS = ["billing_url"];
+
+    for (const provider of registry.providers || []) {
+      const placeholders = new Set();
+      for (const field of SETUP_TIME_FIELDS) {
+        const value = provider[field];
+        if (typeof value !== "string") continue;
+        for (const m of value.matchAll(placeholderRe)) placeholders.add(m[1]);
+      }
+      if (placeholders.size === 0) continue;
+
+      console.log(`  ${info} ${provider.name} needs per-user info before its billing URL is usable.`);
+      const answers = {};
+      for (const key of placeholders) {
+        const label = key.replace(/_/g, " ");
+        const ans = await ask(`    Enter your ${label} for ${provider.name} (leave blank to skip ${provider.name} for now): `);
+        if (ans) answers[key] = ans;
+      }
+
+      if (Object.keys(answers).length === 0) {
+        console.log(`  ${warn} Skipped — ${provider.name}'s billing_url still has a {{placeholder}}. The checkout script will refuse to run until you fill it in (re-run \`npm run setup\` or edit providers.json).`);
+        continue;
+      }
+
+      for (const field of SETUP_TIME_FIELDS) {
+        if (typeof provider[field] !== "string") continue;
+        provider[field] = provider[field].replace(placeholderRe, (full, key) => (key in answers ? answers[key] : full));
+      }
+      provider.billing_url_verified = false; // user-supplied — not verified by us
+      changed = true;
+      console.log(`  ${ok} ${provider.name} configured — verify ${provider.billing_url} looks right before relying on it.`);
+    }
+
+    if (changed) {
+      fs.writeFileSync(providersFile, JSON.stringify(registry, null, 2) + "\n");
+    } else {
+      console.log(`  ${ok} No per-user placeholders left to fill in`);
+    }
+  } catch (e) {
+    console.log(`  ${warn} Could not process providers.json: ${e.message}`);
+  }
+
+  // ── Step 5: MCP config ─────────────────────────────────────────────────────
+  step(5, TOTAL, "Wiring up MCP server in Claude Code…");
 
   const globalConfig  = path.join(os.homedir(), ".claude", "claude_desktop_config.json");
   const projectConfig = path.join(process.cwd(), ".claude", "mcp.json");
@@ -150,7 +205,7 @@ function mergeJson(filePath, patch) {
     mcpServers: {
       "link-cli": {
         command: "npx",
-        args: ["@stripe/link-cli", "mcp"],
+        args: ["@stripe/link-cli", "--mcp"],
         description: "Stripe Link — spend requests and virtual card issuance for Agent Keychain",
       },
     },
@@ -166,8 +221,8 @@ function mergeJson(filePath, patch) {
   }
 
   // ── Done ───────────────────────────────────────────────────────────────────
-  const skillSrc  = path.join(__dirname, "..", "SKILL.md");
-  const skillDest = path.join(process.cwd(), ".claude", "SKILL.md");
+  const skillSrc  = path.join(__dirname, "..", "skills", "topup", "SKILL.md");
+  const skillDest = path.join(process.cwd(), ".claude", "skills", "topup", "SKILL.md");
   const runningFromRepo = path.resolve(process.cwd()) === path.resolve(pkgDir);
 
   console.log(`\n${c.bold}${c.green}Setup complete!${c.reset}\n`);
@@ -177,7 +232,7 @@ function mergeJson(filePath, patch) {
   if (runningFromRepo) {
     console.log(`  ${warn} SKILL.md was NOT auto-copied — you ran setup from inside the agent-keychain repo.`);
     console.log(`     Copy it into each project where you want the top-up skill:`);
-    console.log(`     ${c.dim}cp ${skillSrc} /path/to/your/project/.claude/SKILL.md${c.reset}`);
+    console.log(`     ${c.dim}mkdir -p /path/to/your/project/.claude/skills/topup && cp ${skillSrc} /path/to/your/project/.claude/skills/topup/SKILL.md${c.reset}`);
   } else if (fs.existsSync(skillDest)) {
     console.log(`  ${ok} SKILL.md already in place at ${skillDest}`);
   } else if (fs.existsSync(skillSrc)) {
@@ -185,8 +240,7 @@ function mergeJson(filePath, patch) {
     fs.copyFileSync(skillSrc, skillDest);
     console.log(`  ${ok} Copied SKILL.md → ${skillDest}`);
   } else {
-    console.log(`  ${warn} Copy SKILL.md to your project's .claude/SKILL.md so the agent knows the top-up skill`);
+    console.log(`  ${warn} Copy SKILL.md to your project's .claude/skills/topup/SKILL.md so the agent knows the top-up skill`);
   }
-  console.log(`  ${info} Edit providers.json to customise billing URLs if needed`);
   console.log(`\n${c.dim}Audit log will be written to ~/.agent-keychain/audit-log.json${c.reset}\n`);
 })();

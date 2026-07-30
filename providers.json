@@ -41,12 +41,12 @@
     },
     {
       "name": "v0",
-      "billing_url": "https://v0.app/gaonkarnidhi1-2736/settings/billing",
+      "billing_url": "https://v0.app/{{v0_username}}/settings/billing",
       "merchant_name": "v0 by Vercel",
       "merchant_url": "https://v0.app",
       "has_native_auto_reload": false,
       "suggested_topup_amount_usd": 20,
-      "billing_url_verified": true,
+      "billing_url_verified": false,
       "context_template": "Top up v0 (Vercel AI) credits by ${{amount}} USD. The agent's generation requests are failing due to insufficient credits. Provider: v0 by Vercel. Purpose: restore generation access so the coding session can continue.",
       "error_patterns": [
         "insufficient credits",
@@ -56,7 +56,7 @@
         "402"
       ],
       "checkout_script": "v0.js",
-      "notes": "v0 has no standalone 'buy credits' button. The checkout automation clicks 'Add Card' to register the Link virtual card as a payment method, which can then be used for auto-recharge or plan upgrades. After the card is added, enable auto-recharge via the 'Enable' button on the billing page."
+      "notes": "billing_url contains a {{v0_username}} placeholder — this is unique per user, so it can't ship with a real value. Run `npm run setup` to fill it in, or edit providers.json directly with the username slug from your own v0 billing page URL. v0 has no standalone 'buy credits' button; the checkout automation clicks 'Add Card' to register the Link virtual card as a payment method, which can then be used for auto-recharge or plan upgrades. After the card is added, enable auto-recharge via the 'Enable' button on the billing page."
     }
   ]
 }

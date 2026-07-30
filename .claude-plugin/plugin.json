@@ -1,28 +1,19 @@
 {
   "name": "agent-keychain",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lets a coding agent top up its own API credits when it runs low, using Stripe Link for payment — no Stripe account or API keys required.",
-  "skills": [
-    {
-      "name": "topup",
-      "description": "Request a Stripe Link card to top up an API provider's credits. Triggered automatically on quota/credit errors, or manually with /topup.",
-      "skill_file": "../SKILL.md",
-      "trigger": "automatic"
-    }
-  ],
-  "data_files": [
-    {
-      "path": "../providers.json",
-      "description": "Registry of supported API providers, billing URLs, and error patterns."
-    }
-  ],
-  "mcp_servers": {
-    "link-cli": {
-      "config_file": "../mcp-config.json"
-    }
+  "author": {
+    "name": "Nidhi Gaonkar"
   },
-  "scripts": {
-    "log-topup": "../scripts/log-topup.js",
-    "view-log": "../scripts/view-log.js"
+  "repository": "https://github.com/nidhigaonkar/agent-keychain",
+  "license": "MIT",
+  "keywords": ["stripe", "link", "api-credits", "billing", "agent"],
+  "skills": "./skills",
+  "mcpServers": {
+    "link-cli": {
+      "command": "npx",
+      "args": ["@stripe/link-cli", "--mcp"],
+      "description": "Stripe Link CLI — handles wallet, spend requests, and approval flow for Agent Keychain."
+    }
   }
 }

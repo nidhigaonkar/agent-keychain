@@ -72,6 +72,19 @@ async function main() {
     process.exit(1);
   }
 
+  // billing_url is the only field expected to carry per-user setup-time
+  // placeholders (e.g. {{v0_username}}) — check it explicitly rather than
+  // scanning every field, since context_template intentionally keeps a
+  // runtime {{amount}} placeholder that the agent fills in per request.
+  const placeholderRe = /\{\{(\w+)\}\}/;
+  if (typeof provider.billing_url === "string" && placeholderRe.test(provider.billing_url)) {
+    console.error(
+      `Provider "${provider.name}" has an unresolved placeholder in its billing_url: ${provider.billing_url}\n` +
+      `Run \`npm run setup\` again or edit providers.json directly before checking out.`
+    );
+    process.exit(1);
+  }
+
   // Read card data from stdin — never written to disk by this script
   let cardData;
   try {
@@ -95,9 +108,12 @@ async function main() {
   console.log(`Billing URL: ${provider.billing_url}`);
   if (args["dry-run"]) console.log("DRY RUN — form will not be submitted.");
 
+  // Uses Playwright's bundled Chromium (installed by `npm run setup`) rather
+  // than a "channel" browser, so it works without requiring the user to have
+  // a specific system browser installed. Login state persists across runs via
+  // PROFILE_DIR, so this doesn't need to be the user's everyday browser.
   const browser = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: false,
-    channel:  "chrome",
     viewport: { width: 1280, height: 800 },
     args:     ["--disable-blink-features=AutomationControlled"],
   });

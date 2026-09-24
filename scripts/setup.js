@@ -7,8 +7,9 @@
 const { execSync, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const readline = require("readline");
+const { loadEnvFile, repoEnvPath, upsertEnvVar } = require("./lib/env");
+const { fetchStripeLinkStatus } = require("./lib/browser-use");
 
 // ── ANSI colours ──────────────────────────────────────────────────────────────
 const c = {
@@ -29,9 +30,22 @@ function step(n, total, msg) {
   process.stdout.write(`\n${c.bold}[${n}/${total}]${c.reset} ${msg}\n`);
 }
 
+// A single shared interface for the whole run. Creating a fresh
+// readline.Interface per question drops buffered input when stdin is a
+// non-TTY pipe (e.g. answers piped in via a script) — the first interface
+// can read ahead and consume lines meant for later questions.
+let rlInstance = null;
+function getRl() {
+  if (!rlInstance) {
+    rlInstance = readline.createInterface({ input: process.stdin, output: process.stdout });
+  }
+  return rlInstance;
+}
 function ask(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => rl.question(question, ans => { rl.close(); resolve(ans.trim()); }));
+  return new Promise(resolve => getRl().question(question, ans => resolve(ans.trim())));
+}
+function closeRl() {
+  if (rlInstance) rlInstance.close();
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -43,24 +57,6 @@ function nodeVersion() {
 
 function run(cmd, { silent = false, cwd } = {}) {
   return spawnSync(cmd, { shell: true, encoding: "utf8", stdio: silent ? "pipe" : "inherit", cwd });
-}
-
-function mergeJson(filePath, patch) {
-  let obj = {};
-  if (fs.existsSync(filePath)) {
-    try {
-      obj = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    } catch (e) {
-      throw new Error(`Cannot parse existing config at ${filePath}: ${e.message}\nFix or delete it before running setup.`);
-    }
-  }
-  // Deep-merge top level + mcpServers
-  const merged = { ...obj, ...patch };
-  if (patch.mcpServers) {
-    merged.mcpServers = { ...(obj.mcpServers || {}), ...patch.mcpServers };
-  }
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(merged, null, 2) + "\n");
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -81,7 +77,7 @@ function mergeJson(filePath, patch) {
   // ── Step 1: npm install ────────────────────────────────────────────────────
   step(1, TOTAL, "Installing npm dependencies…");
   const pkgDir = path.join(__dirname, "..");
-  const nodeModulesOk = fs.existsSync(path.join(pkgDir, "node_modules", "playwright"));
+  const nodeModulesOk = fs.existsSync(path.join(pkgDir, "node_modules", "browser-use-sdk"));
   if (nodeModulesOk) {
     console.log(`  ${ok} Already installed — skipping npm install`);
   } else {
@@ -90,44 +86,64 @@ function mergeJson(filePath, patch) {
     console.log(`  ${ok} Dependencies installed`);
   }
 
-  // ── Step 2: Playwright Chromium ────────────────────────────────────────────
-  step(2, TOTAL, "Installing Playwright Chromium browser…");
-  // Cross-platform Chromium cache paths
-  const playwrightCaches = [
-    path.join(os.homedir(), "Library", "Caches", "ms-playwright"),  // macOS
-    path.join(os.homedir(), ".cache", "ms-playwright"),              // Linux
-    path.join(os.homedir(), "AppData", "Local", "ms-playwright"),    // Windows
-  ];
-  const hasChromium = playwrightCaches.some(
-    dir => fs.existsSync(dir) && fs.readdirSync(dir).some(d => d.startsWith("chromium"))
-  );
+  // ── Step 2: Browser Use API key ────────────────────────────────────────────
+  step(2, TOTAL, "Configuring Browser Use Cloud API…");
+  const envPath = repoEnvPath(pkgDir);
+  loadEnvFile(envPath);
 
-  if (hasChromium) {
-    console.log(`  ${ok} Chromium already installed — skipping`);
+  if (process.env.BROWSER_USE_API_KEY) {
+    console.log(`  ${ok} BROWSER_USE_API_KEY already set`);
   } else {
-    console.log(`  ${info} Downloading Chromium (one-time, ~130 MB)…`);
-    const r = run("npx playwright install chromium", { cwd: pkgDir });
-    if (r.status !== 0) { console.error(`\n${fail} Playwright install failed.`); process.exit(1); }
-    console.log(`  ${ok} Chromium installed`);
+    console.log(`  ${info} Get an API key at https://cloud.browser-use.com/settings?tab=api-keys`);
+    const apiKey = await ask("  Paste your Browser Use API key: ");
+    if (!apiKey) {
+      console.error(`\n${fail} Browser Use API key is required for checkout automation.`);
+      process.exit(1);
+    }
+    upsertEnvVar(envPath, "BROWSER_USE_API_KEY", apiKey);
+    process.env.BROWSER_USE_API_KEY = apiKey;
+    console.log(`  ${ok} Saved to ${envPath}`);
   }
 
-  // ── Step 3: Stripe Link auth ───────────────────────────────────────────────
-  step(3, TOTAL, "Authenticating with Stripe Link…");
-  // Check if already authenticated by running a fast command
+  const profileId = await ask("  Browser Use profile ID for synced logins (optional, press Enter to skip): ");
+  if (profileId) {
+    upsertEnvVar(envPath, "BROWSER_USE_PROFILE_ID", profileId);
+    console.log(`  ${ok} Profile ID saved — see https://docs.browser-use.com/cloud/guides/profile-sync.md`);
+  } else {
+    console.log(`  ${warn} No profile ID — sync login cookies before checkout:`);
+    console.log(`     ${c.dim}curl -fsSL https://browser-use.com/profile.sh | sh${c.reset}`);
+  }
+
+  try {
+    const linkStatus = await fetchStripeLinkStatus(process.env.BROWSER_USE_API_KEY);
+    if (linkStatus.isConnected && linkStatus.connectionId) {
+      upsertEnvVar(envPath, "BROWSER_USE_STRIPE_LINK_CONNECTION_ID", linkStatus.connectionId);
+      console.log(`  ${ok} Stripe Link connected (${linkStatus.linkEmail || linkStatus.connectionId})`);
+    } else {
+      console.log(`  ${warn} Stripe Link not connected to Browser Use yet.`);
+      console.log(`     Open https://cloud.browser-use.com → Integrations → Connect Stripe Link`);
+      console.log(`     ${c.dim}https://browser-use.com/posts/pay-with-link${c.reset}`);
+    }
+  } catch (e) {
+    console.log(`  ${warn} Could not check Stripe Link status: ${e.message}`);
+  }
+
+  // ── Step 3: link-cli auth (one-time, for checkout approval links in terminal) ─
+  step(3, TOTAL, "Authenticating link-cli (one-time, same Link wallet)…");
   const authCheck = run("npx @stripe/link-cli auth status", { silent: true });
   const alreadyAuthed = authCheck.status === 0 && authCheck.stdout.includes("authenticated: true");
 
   if (alreadyAuthed) {
-    console.log(`  ${ok} Already authenticated with Stripe Link`);
+    console.log(`  ${ok} link-cli already authenticated`);
   } else {
-    console.log(`  ${info} Opening browser for Stripe Link authentication…`);
-    console.log(`  ${c.dim}(Create a free account at link.stripe.com if you don't have one)${c.reset}`);
-    const r = run("npx @stripe/link-cli auth login --client-name \"Agent Keychain\"", { cwd: pkgDir });
+    console.log(`  ${info} Opening browser for Stripe Link login…`);
+    console.log(`  ${c.dim}(Same wallet you connected in Browser Use Integrations)${c.reset}`);
+    const r = run('npx @stripe/link-cli auth login --client-name "Agent Keychain"', { cwd: pkgDir });
     if (r.status !== 0) {
-      console.error(`\n${fail} Authentication failed. Run manually:\n  npx @stripe/link-cli auth login --client-name "Agent Keychain"`);
+      console.error(`\n${fail} link-cli auth failed. Run manually:\n  npx @stripe/link-cli auth login --client-name "Agent Keychain"`);
       process.exit(1);
     }
-    console.log(`  ${ok} Authenticated`);
+    console.log(`  ${ok} link-cli authenticated`);
   }
 
   // ── Step 4: Fill in per-user provider placeholders ─────────────────────────
@@ -185,40 +201,8 @@ function mergeJson(filePath, patch) {
     console.log(`  ${warn} Could not process providers.json: ${e.message}`);
   }
 
-  // ── Step 5: MCP config ─────────────────────────────────────────────────────
-  step(5, TOTAL, "Wiring up MCP server in Claude Code…");
-
-  const globalConfig  = path.join(os.homedir(), ".claude", "claude_desktop_config.json");
-  const projectConfig = path.join(process.cwd(), ".claude", "mcp.json");
-
-  console.log(`  ${info} Where should the link-cli MCP server be registered?\n`);
-  console.log(`    ${c.bold}1${c.reset}  Global  — available in every Claude Code project`);
-  console.log(`       ${c.dim}${globalConfig}${c.reset}`);
-  console.log(`    ${c.bold}2${c.reset}  Project — only this directory`);
-  console.log(`       ${c.dim}${projectConfig}${c.reset}`);
-  console.log(`    ${c.bold}3${c.reset}  Both`);
-
-  const choice = await ask("\n  Enter 1, 2, or 3 [default: 1]: ");
-  const scope = ["2", "3"].includes(choice) ? choice : "1";
-
-  const patch = {
-    mcpServers: {
-      "link-cli": {
-        command: "npx",
-        args: ["@stripe/link-cli", "--mcp"],
-        description: "Stripe Link — spend requests and virtual card issuance for Agent Keychain",
-      },
-    },
-  };
-
-  if (scope === "1" || scope === "3") {
-    mergeJson(globalConfig, patch);
-    console.log(`  ${ok} Written to ${globalConfig}`);
-  }
-  if (scope === "2" || scope === "3") {
-    mergeJson(projectConfig, patch);
-    console.log(`  ${ok} Written to ${projectConfig}`);
-  }
+  // ── Step 5: Install skill ──────────────────────────────────────────────────
+  step(5, TOTAL, "Installing top-up skill…");
 
   // ── Done ───────────────────────────────────────────────────────────────────
   const skillSrc  = path.join(__dirname, "..", "skills", "topup", "SKILL.md");
@@ -227,7 +211,10 @@ function mergeJson(filePath, patch) {
 
   console.log(`\n${c.bold}${c.green}Setup complete!${c.reset}\n`);
   console.log(`${c.bold}Next steps:${c.reset}`);
-  console.log(`  ${info} Restart Claude Code (or run /mcp to reload servers)`);
+  console.log(`  ${info} Restart Claude Code so the top-up skill is loaded`);
+  if (!process.env.BROWSER_USE_STRIPE_LINK_CONNECTION_ID) {
+    console.log(`  ${warn} Connect Stripe Link once: https://cloud.browser-use.com → Integrations`);
+  }
 
   if (runningFromRepo) {
     console.log(`  ${warn} SKILL.md was NOT auto-copied — you ran setup from inside the agent-keychain repo.`);
@@ -243,4 +230,9 @@ function mergeJson(filePath, patch) {
     console.log(`  ${warn} Copy SKILL.md to your project's .claude/skills/topup/SKILL.md so the agent knows the top-up skill`);
   }
   console.log(`\n${c.dim}Audit log will be written to ~/.agent-keychain/audit-log.json${c.reset}\n`);
-})();
+  closeRl();
+})().catch(err => {
+  console.error(`\n${fail} Setup failed: ${err.message}`);
+  closeRl();
+  process.exit(1);
+});

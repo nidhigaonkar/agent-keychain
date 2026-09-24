@@ -27,14 +27,14 @@ function main() {
     return;
   }
 
-  const col = { id: 12, ts: 24, provider: 12, amount: 10, reqId: 28 };
+  const col = { id: 12, ts: 24, provider: 12, amount: 10, refId: 36 };
   const header =
     "ID".padEnd(col.id) +
     "Timestamp".padEnd(col.ts) +
     "Provider".padEnd(col.provider) +
     "Amount".padEnd(col.amount) +
-    "Spend Request ID";
-  const divider = "-".repeat(header.length + col.reqId);
+    "Run / Spend Request ID";
+  const divider = "-".repeat(header.length + col.refId);
 
   console.log(`\nAgent Keychain — Top-Up Audit Log`);
   console.log(`File: ${LOG_FILE}\n`);
@@ -43,15 +43,16 @@ function main() {
 
   let total = 0;
   for (const entry of log) {
-    const shortId = (entry.id || entry.spend_request_id || "").replace("topup_", "").slice(-8);
+    const shortId = (entry.id || entry.browser_use_run_id || entry.spend_request_id || "").replace("topup_", "").slice(-8);
     const ts = entry.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z");
     const amount = `$${entry.amount_usd.toFixed(2)}`;
+    const ref = entry.browser_use_run_id || entry.spend_request_id || "";
     console.log(
       shortId.padEnd(col.id) +
       ts.padEnd(col.ts) +
       (entry.provider || "").padEnd(col.provider) +
       amount.padEnd(col.amount) +
-      (entry.spend_request_id || "")
+      ref
     );
     total += entry.amount_usd || 0;
   }

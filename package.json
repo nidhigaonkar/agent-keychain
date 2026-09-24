@@ -16,9 +16,16 @@
     "keychain-checkout": "./scripts/checkout/run.js"
   },
   "dependencies": {
-    "playwright": "^1.49.0"
+    "browser-use-sdk": "^3.11.3"
   },
-  "keywords": ["claude-code", "plugin", "stripe", "link", "api-credits", "agent"],
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "stripe",
+    "link",
+    "api-credits",
+    "agent"
+  ],
   "author": "",
   "license": "MIT",
   "engines": {

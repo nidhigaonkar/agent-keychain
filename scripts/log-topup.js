@@ -27,7 +27,7 @@ Usage: node log-topup.js \\
   --provider <name> \\
   --amount <dollars> \\
   --currency <usd> \\
-  --spend-request-id <id> \\
+  (--browser-use-run-id <id> | --spend-request-id <id>) \\
   --context <string>
 
 WARNING: Do NOT pass card numbers, CVCs, or expiry dates.
@@ -38,10 +38,17 @@ WARNING: Do NOT pass card numbers, CVCs, or expiry dates.
 function main() {
   const args = parseArgs(process.argv);
 
-  const required = ["provider", "amount", "currency", "spend-request-id", "context"];
+  const required = ["provider", "amount", "currency", "context"];
   const missing = required.filter((k) => !args[k]);
   if (missing.length) {
     console.error(`Missing required arguments: ${missing.join(", ")}`);
+    usage();
+  }
+
+  const runId = args["browser-use-run-id"];
+  const spendRequestId = args["spend-request-id"];
+  if (!runId && !spendRequestId) {
+    console.error("Provide --browser-use-run-id (preferred) or --spend-request-id (legacy).");
     usage();
   }
 
@@ -75,14 +82,16 @@ function main() {
     provider: args["provider"],
     amount_usd: parseFloat(args["amount"]),
     currency: args["currency"] || "usd",
-    spend_request_id: args["spend-request-id"],
+    browser_use_run_id: runId || null,
+    spend_request_id: spendRequestId || null,
     context: args["context"],
   };
 
   log.push(entry);
   fs.writeFileSync(LOG_FILE, JSON.stringify(log, null, 2));
 
-  console.log(`Logged top-up: ${entry.provider} $${entry.amount_usd} [${entry.spend_request_id}]`);
+  const auditRef = runId || spendRequestId;
+  console.log(`Logged top-up: ${entry.provider} $${entry.amount_usd} [${auditRef}]`);
   console.log(`Log file: ${LOG_FILE}`);
 }
 
